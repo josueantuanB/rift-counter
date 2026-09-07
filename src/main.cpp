@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 4
-#define VERSION    "v0.4"
+#define FW_VERSION 5
+#define VERSION    "v0.5"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -129,6 +129,16 @@ static void drawPanel(const Btn &b, uint16_t border, uint16_t fill = C_PANEL,
   tft.fillTriangle(b.x, y2 - BEVEL, b.x, y2, b.x + BEVEL, y2, around);
   tft.fillTriangle(x2, y2 - BEVEL, x2, y2, x2 - BEVEL, y2, around);
   panelOutline(b, border);
+}
+
+// El + y el - se dibujan, no se escriben: TFT_eSPI centra las fuentes GFX por
+// la altura de la fuente y no la del glifo, y estos dos no tienen ni ascendente
+// ni descendente, asi que quedaban unos 7 px por debajo del centro del boton.
+static void drawSign(const Btn &b, bool plus, uint16_t c) {
+  const int16_t cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  const int16_t len = 26, th = 6;
+  tft.fillRect(cx - len / 2, cy - th / 2, len, th, c);
+  if (plus) tft.fillRect(cx - th / 2, cy - len / 2, th, len, c);
 }
 
 static void drawBtn(const Btn &b, uint16_t border, uint16_t textColor, const GFXfont *f,
@@ -377,8 +387,10 @@ static void drawGame() {
     tft.setTextColor(C_TEAL, C_BG);
     tft.drawString(PLAYER[i], HALF_CX[i], 52);
     drawScore(i);
-    drawBtn(BTN_MINUS[i], C_GOLD_DIM, C_TEXT, &FreeSansBold18pt7b);
-    drawBtn(BTN_PLUS[i], C_GOLD, C_TEXT, &FreeSansBold18pt7b);
+    drawPanel(BTN_MINUS[i], C_GOLD_DIM);
+    drawSign(BTN_MINUS[i], false, C_TEXT);
+    drawPanel(BTN_PLUS[i], C_GOLD);
+    drawSign(BTN_PLUS[i], true, C_TEXT);
 
     if (!useXp) continue;
     drawPanel(BTN_XP[i], C_GOLD_DIM);
