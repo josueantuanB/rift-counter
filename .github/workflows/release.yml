@@ -1,0 +1,36 @@
+name: release
+
+# Publica el binario y el manifiesto al empujar una etiqueta v*.
+#   1. subir FW_VERSION y VERSION en src/main.cpp
+#   2. git tag v0.4 && git push --tags
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install platformio
+      - run: pio run -e es3c28p
+
+      # La version sale del propio codigo, no de la etiqueta: es la que el
+      # aparato compara, y si divergen nunca se daria por actualizado.
+      - name: firmware.json
+        run: |
+          V=$(grep -oP '#define FW_VERSION\s+\K[0-9]+' src/main.cpp)
+          echo "{\"version\":$V,\"url\":\"https://github.com/${{ github.repository }}/releases/latest/download/firmware.bin\"}" > firmware.json
+          cat firmware.json
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            .pio/build/es3c28p/firmware.bin
+            firmware.json
