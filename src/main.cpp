@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 3
-#define VERSION    "v0.3"
+#define FW_VERSION 4
+#define VERSION    "v0.4"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -890,14 +890,13 @@ static void resetGame() {
   rounds[0] = rounds[1] = 0;
   xp[0] = xp[1] = 0;
   dice = 0;              // sin tirar todavia
-  gameStart = millis();  // el reloj de fondo ya muestra el tiempo completo
+  gameStart = millis();  // el reloj arranca aqui, no al pulsar EMPEZAR
   screen = SCREEN_DICE;
   dirty = true;
 }
 
 static void startGame() {
-  gameStart = millis();  // el reloj no corre mientras se tira el dado
-  screen = SCREEN_GAME;
+  screen = SCREEN_GAME;  // el reloj ya viene corriendo: EMPEZAR no lo reinicia
   dirty = true;
 }
 
