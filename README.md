@@ -11,7 +11,8 @@ Contador de puntos para el TCG **Riftbound**, en una placa **ES3C28P**
 - Contador de XP opcional, que se pregunta al empezar.
 - Tirada de d20 para decidir quien empieza.
 - Porcentaje de bateria (LiPo 1S por el divisor de IO9).
-- Apagado por sueno ligero: despierta al tocar la pantalla.
+- Apagado por sueno ligero: despierta al tocar la pantalla. Se apaga solo tras
+  10 minutos sin uso, guardando la partida en NVS para seguir donde estaba.
 - Actualizacion por WiFi desde los releases de este repositorio.
 
 ## Compilar

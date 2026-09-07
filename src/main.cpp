@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 6
-#define VERSION    "v0.6"
+#define FW_VERSION 7
+#define VERSION    "v0.7"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -35,6 +35,9 @@
 #define MATCH_MIN_BO1 30
 #define MATCH_MIN_BO3 60
 #define CLOCK_WARN_S  300  // ultimos 5 minutos, en rojo
+
+// Minutos sin tocar la pantalla antes de apagarse solo.
+#define IDLE_OFF_MIN 10
 
 // ---------------------------------------------------------------- hardware
 // ES3C28P: LCD ILI9341V por SPI (pines en platformio.ini) + tactil FT6336 I2C.
@@ -235,6 +238,7 @@ static uint8_t winner = 0;
 static uint8_t roundsToWin() { return fmt == FMT_BO3 ? 2 : 1; }
 
 static uint32_t gameStart = 0;
+static uint32_t lastTouch = 0;  // para el apagado por inactividad
 
 static uint32_t matchSeconds() {
   return (fmt == FMT_BO3 ? MATCH_MIN_BO3 : MATCH_MIN_BO1) * 60UL;
@@ -944,12 +948,51 @@ static void confirmWin() {
   dirty = true;
 }
 
+// El apagado reinicia el chip, asi que la partida en curso se guarda en NVS y
+// se recupera al arrancar. Sin esto, el apagado automatico te borraria el
+// marcador cada vez que pasaran diez minutos sin tocar nada.
+struct Session {
+  uint8_t fmt, useXp, winner, score[2], rounds[2], xp[2];
+  uint32_t remaining;
+};
+
+static void sessionSave(uint32_t remaining) {
+  const Session v = {(uint8_t)fmt,   (uint8_t)useXp,       winner,
+                     {score[0], score[1]}, {rounds[0], rounds[1]},
+                     {xp[0], xp[1]},  remaining};
+  prefs.putBytes("sess", &v, sizeof v);
+}
+
+static void sessionClear() { prefs.remove("sess"); }
+
+static bool sessionLoad() {
+  Session v;
+  if (prefs.getBytes("sess", &v, sizeof v) != sizeof v) return false;
+  fmt = (Fmt)v.fmt;
+  useXp = v.useXp;
+  winner = v.winner;
+  score[0] = v.score[0];
+  score[1] = v.score[1];
+  rounds[0] = v.rounds[0];
+  rounds[1] = v.rounds[1];
+  xp[0] = v.xp[0];
+  xp[1] = v.xp[1];
+
+  const uint32_t total = matchSeconds();
+  const uint32_t rem = v.remaining > total ? total : v.remaining;
+  gameStart = millis() - (total - rem) * 1000UL;  // deja el reloj donde estaba
+  return true;
+}
+
 // El ESP32 no se apaga de verdad. Sueno ligero, no profundo: el profundo no
 // conserva el estado de los pines, asi que TP_RST se caia, el FT6336 se quedaba
 // en reset y no despertaba al tocar. En ligero siguen vivos los pines y el I2C,
 // asi que se le puede preguntar al tactil directamente y no dependemos del pin
 // INT ni de su pull-up.
 static void powerOff() {
+  const bool inGame = screen == SCREEN_GAME || screen == SCREEN_DICE ||
+                      screen == SCREEN_ASK_WIN;
+  WiFi.mode(WIFI_OFF);
   digitalWrite(TFT_BL, LOW);
   tft.writecommand(0x10);  // ILI9341 sleep in
 
@@ -965,6 +1008,10 @@ static void powerOff() {
   } while (!tpRead(x, y));
 
   while (tpRead(x, y)) delay(10);  // el dedo que enciende no cuenta como pulsacion
+
+  // millis() sigue corriendo durante el sueno ligero, asi que el tiempo dormido
+  // ya viene descontado: el reloj de partida no se para por apagarse.
+  if (inGame) sessionSave(remainingSeconds());
 
   // El USB-CDC no sobrevive al sueno ligero y no vuelve solo: sin esto, una vez
   // apagada ya no se puede reflashear sin llegar al boton RESET, que dentro de
@@ -1002,6 +1049,7 @@ static void handleTap(int16_t x, int16_t y) {
 
     case SCREEN_GAME:
       if (hit(BTN_MENU, x, y)) {
+        sessionClear();  // salir al menu abandona la partida
         screen = SCREEN_MENU;
         dirty = true;
         break;
@@ -1162,6 +1210,7 @@ static void handleTap(int16_t x, int16_t y) {
       if (hit(BTN_AGAIN, x, y)) {
         resetGame();  // la revancha tambien decide quien empieza
       } else if (hit(BTN_HOME, x, y)) {
+        sessionClear();
         screen = SCREEN_MENU;
         dirty = true;
       }
@@ -1232,6 +1281,11 @@ static void selfTest() {
   CHECK(matchSeconds() == 30 * 60);
   fmt = FMT_BO3;
   CHECK(matchSeconds() == 60 * 60);
+
+  // Recuperar la partida debe devolver el reloj al mismo punto.
+  const uint32_t rem = 900;
+  gameStart = millis() - (matchSeconds() - rem) * 1000UL;
+  CHECK(remainingSeconds() == rem);
   fmt = saved;
 
   CHECK(batPercent(3750) == 50);
@@ -1267,6 +1321,12 @@ void setup() {
     prefs.getString("ssid", "").toCharArray(wifiSsid, sizeof wifiSsid);
     prefs.getString("pass", "").toCharArray(wifiPass, sizeof wifiPass);
   }
+
+  if (prefs.isKey("sess") && sessionLoad()) {
+    screen = score[0] >= TARGET_POINTS || score[1] >= TARGET_POINTS ? SCREEN_ASK_WIN
+                                                                   : SCREEN_GAME;
+  }
+  lastTouch = millis();
 
   const uint16_t mv = batMillivolts();
   batPct = mv < BAT_MIN_MV ? -1 : batPercent(mv);
@@ -1315,6 +1375,8 @@ void loop() {
   int16_t x = 0, y = 0;
   const bool down = touchDown(x, y);
 
+  if (down) lastTouch = millis();
+
   if (down && !wasTouched) {  // solo el flanco: un tap = una accion
 #if TOUCH_DEBUG
     Serial.printf("tap crudo=%d,%d  px=%d,%d\n", rawX, rawY, x, y);
@@ -1343,5 +1405,6 @@ void loop() {
   }
   refreshClock();
   refreshBattery();
+  if (millis() - lastTouch > IDLE_OFF_MIN * 60000UL) powerOff();
   delay(10);
 }
