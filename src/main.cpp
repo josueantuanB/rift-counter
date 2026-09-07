@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 5
-#define VERSION    "v0.5"
+#define FW_VERSION 6
+#define VERSION    "v0.6"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -499,14 +499,19 @@ static void drawUpdate() {
   drawRule(54);
 
   const bool up = WiFi.status() == WL_CONNECTED;
+  const bool saved = wifiSsid[0] != 0;
   char line[48];
-  snprintf(line, sizeof line, up ? "RED: %s" : "SIN RED", wifiSsid);
+  if (up)         snprintf(line, sizeof line, "CONECTADO: %s", wifiSsid);
+  else if (saved) snprintf(line, sizeof line, "GUARDADA: %s", wifiSsid);
+  else            snprintf(line, sizeof line, "SIN RED");
   tft.setTextFont(2);
   tft.setTextColor(up ? C_TEAL : C_MUTED, C_BG);
   tft.drawString(line, 160, 72);
 
   drawBtn(BTN_WIFI, C_GOLD_DIM, C_TEXT, &FreeSansBold9pt7b);
-  drawBtn(BTN_CHECK, up ? C_GOLD : C_GOLD_DIM, up ? C_TEXT : C_MUTED, &FreeSansBold9pt7b);
+  // Basta con tener red guardada: BUSCAR enciende la radio si hace falta.
+  drawBtn(BTN_CHECK, saved ? C_GOLD : C_GOLD_DIM, saved ? C_TEXT : C_MUTED,
+          &FreeSansBold9pt7b);
 
   tft.setTextFont(2);
   tft.setTextDatum(BC_DATUM);
@@ -975,8 +980,7 @@ static void handleTap(int16_t x, int16_t y) {
         screen = SCREEN_FORMAT;
         dirty = true;
       } else if (hit(BTN_UPD, x, y)) {
-        otaMsg[0] = 0;
-        if (wifiSsid[0] && WiFi.status() != WL_CONNECTED) wifiConnect();
+        otaMsg[0] = 0;  // entrar no enciende la radio: solo BUSCAR la necesita
         screen = SCREEN_UPDATE;
         dirty = true;
       } else if (hit(BTN_OFF, x, y)) {
@@ -1032,8 +1036,9 @@ static void handleTap(int16_t x, int16_t y) {
         scanNets();
         screen = SCREEN_WIFI;
         dirty = true;
-      } else if (hit(BTN_CHECK, x, y) && WiFi.status() == WL_CONNECTED) {
-        otaRun();
+      } else if (hit(BTN_CHECK, x, y) && wifiSsid[0]) {
+        if (WiFi.status() != WL_CONNECTED) wifiConnect();
+        if (WiFi.status() == WL_CONNECTED) otaRun();
         dirty = true;
       }
       break;
