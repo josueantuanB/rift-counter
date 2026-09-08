@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 7
-#define VERSION    "v0.7"
+#define FW_VERSION 8
+#define VERSION    "v0.8"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -46,6 +46,7 @@
 #define TP_RST   18
 #define TP_INT   17
 #define TP_ADDR  0x38
+#define AMP_EN   1  // habilitacion del amplificador FM8002E
 #define BAT_ADC  9
 
 #define SCREEN_ROTATION 1  // 1 = apaisado 320x240 (3 = apaisado al reves)
@@ -62,6 +63,11 @@
 #define TP_RAW_X_MAX 239
 #define TP_RAW_Y_MIN 0
 #define TP_RAW_Y_MAX 319
+
+// El amplificador se queda encendido gastando si nadie toca su pin, y aqui no
+// se usa el audio. Si medir dice que consume mas con esto, invertir el nivel:
+// no he confirmado la polaridad del FM8002E.
+#define AMP_OFF_LEVEL LOW
 
 // Perilla de calibracion: la placa mide VBAT por un divisor resistivo. Si el
 // porcentaje sale desviado, medir VBAT con un multimetro y ajustar el factor.
@@ -1303,6 +1309,9 @@ void setup() {
 
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, LOW);  // se enciende al final, con la primera pantalla ya pintada
+
+  pinMode(AMP_EN, OUTPUT);  // el sueno ligero conserva el nivel, basta ponerlo aqui
+  digitalWrite(AMP_EN, AMP_OFF_LEVEL);
 
   tft.init();
   tft.setRotation(SCREEN_ROTATION);
