@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 9
-#define VERSION    "v0.9"
+#define FW_VERSION 10
+#define VERSION    "v1.0"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -264,7 +264,7 @@ static uint32_t remainingSeconds() {
   return elapsed >= total ? 0 : total - elapsed;
 }
 
-static const char *PLAYER[2] = {"YO", "RIVAL"};
+static const char *PLAYER[2] = {"JUGADOR 1", "JUGADOR 2"};
 
 // Los botones chicos pegados a un borde fallaban: el panel no siempre reporta
 // los extremos del rango. Van con area de toque generosa y algo hacia dentro.
@@ -283,7 +283,7 @@ static const int16_t HALF_CX[2] = {80, 240};
 static const Btn BTN_MINUS[2] = {{10, 118, 64, 52, "-"}, {170, 118, 64, 52, "-"}};
 static const Btn BTN_PLUS[2]  = {{86, 118, 64, 52, "+"}, {246, 118, 64, 52, "+"}};
 
-// XP hacia fuera: bajo el "-" de YO y bajo el "+" del RIVAL.
+// XP hacia fuera: bajo el "-" del jugador 1 y bajo el "+" del jugador 2.
 static const Btn BTN_XP[2] = {{6, 176, 76, 46, "XP"}, {238, 176, 76, 46, "XP"}};
 static const Btn BTN_AGAIN = {30, 164, 120, 44, "REVANCHA"};
 static const Btn BTN_HOME  = {170, 164, 120, 44, "MENU"};
@@ -431,7 +431,7 @@ static void drawWin() {
   tft.setTextColor(C_TEAL, C_BG);
   tft.drawString("GANADOR", 160, 66);
 
-  tft.setFreeFont(&FreeSansBold24pt7b);
+  tft.setFreeFont(&FreeSansBold18pt7b);
   tft.setTextColor(C_GOLD, C_BG);
   tft.drawString(PLAYER[winner], 160, 102);
 
