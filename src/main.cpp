@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 10
-#define VERSION    "v1.0"
+#define FW_VERSION 11
+#define VERSION    "v1.1"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -162,8 +162,13 @@ static void drawBtn(const Btn &b, uint16_t border, uint16_t textColor, const GFX
 // ----------------------------------------------------------------- bateria
 // Curva de descarga de una LiPo 1S. Un mapeo lineal 3.3-4.2V mentiria: la
 // celda pasa la mayor parte de su vida entre 3.7 y 3.9V.
+//
+// El 100% esta en 4100 y no en 4200 a proposito: el aparato se alimenta de la
+// misma celda mientras carga, asi que en cuanto el modulo termina y se apaga,
+// la pantalla encendida baja la celda a ~4.1 en minutos. Con 4200 arriba, una
+// bateria recien cargada no llegaba a marcar el 100% nunca.
 static const struct { uint16_t mv; uint8_t pct; } BAT_CURVE[] = {
-    {4200, 100}, {4100, 92}, {4000, 84}, {3900, 74}, {3800, 60}, {3750, 50},
+    {4100, 100}, {4000, 88}, {3900, 74}, {3800, 60}, {3750, 50},
     {3700, 40},  {3650, 30}, {3600, 20}, {3500, 10}, {3400, 5},  {3300, 0},
 };
 
