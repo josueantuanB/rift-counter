@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 8
-#define VERSION    "v0.8"
+#define FW_VERSION 9
+#define VERSION    "v0.9"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -180,13 +180,20 @@ static uint8_t batPercent(uint16_t mv) {
   return 0;
 }
 
-static uint16_t batMillivolts() {
+// Se guardan los dos numeros: el del pin es el que hace falta para ajustar
+// BAT_DIVIDER, y no hay forma de leerlo con el case cerrado si no se pinta.
+static uint16_t batAdcMv = 0;  // lo que ve el pin, ya dividido
+static uint16_t batMv = 0;     // lo de la celda, deshecho el divisor
+
+static void batRead() {
   uint32_t sum = 0;
   for (int i = 0; i < 8; i++) sum += analogReadMilliVolts(BAT_ADC);
-  return (uint16_t)(sum / 8 * BAT_DIVIDER);
+  batAdcMv = (uint16_t)(sum / 8);
+  batMv = (uint16_t)(batAdcMv * BAT_DIVIDER);
 }
 
 static int16_t batPct = -1;  // -1 = sin bateria, alimentado por USB
+static bool selfTestOk = true;
 
 // Siempre en la misma esquina, asi vale para todas las pantallas.
 static void drawBattery() {
@@ -217,6 +224,7 @@ enum Screen : uint8_t {
   SCREEN_UPDATE,   // estado de red y busqueda de actualizacion
   SCREEN_WIFI,     // lista de redes
   SCREEN_KEYB,     // teclado para la clave
+  SCREEN_DIAG,     // numeros crudos, para calibrar sin multimetro
   SCREEN_ASK_XP,   // preguntar si la partida lleva XP
   SCREEN_ASK_OFF,  // confirmar apagado
   SCREEN_ASK_WIN,  // confirmar victoria
@@ -472,8 +480,9 @@ static uint8_t netCount = 0;  // resultado del ultimo escaneo
 static uint8_t netPage = 0;
 
 static const Btn BTN_UPD_BACK = {0, 0, 100, 46, "< VOLVER"};
-static const Btn BTN_WIFI     = {40, 92, 240, 44, "ELEGIR RED"};
-static const Btn BTN_CHECK    = {40, 146, 240, 44, "BUSCAR ACTUALIZACION"};
+static const Btn BTN_WIFI     = {40, 84, 240, 42, "ELEGIR RED"};
+static const Btn BTN_CHECK    = {40, 132, 240, 42, "BUSCAR ACTUALIZACION"};
+static const Btn BTN_DIAG     = {40, 180, 240, 36, "DATOS"};
 
 #define NET_PER_PAGE 5
 static const Btn BTN_NET[NET_PER_PAGE] = {
@@ -522,6 +531,7 @@ static void drawUpdate() {
   // Basta con tener red guardada: BUSCAR enciende la radio si hace falta.
   drawBtn(BTN_CHECK, saved ? C_GOLD : C_GOLD_DIM, saved ? C_TEXT : C_MUTED,
           &FreeSansBold9pt7b);
+  drawBtn(BTN_DIAG, C_GOLD_DIM, C_MUTED, &FreeSansBold9pt7b);
 
   tft.setTextFont(2);
   tft.setTextDatum(BC_DATUM);
@@ -824,6 +834,8 @@ static void drawDice() {
   drawDiceValue();  // no tira solo: hay que pulsar TIRAR
 }
 
+static void drawDiag();  // vive abajo, con el tactil que es lo que lee
+
 static void draw() {
   switch (screen) {
     case SCREEN_MENU:   drawMenu();   break;
@@ -837,6 +849,7 @@ static void draw() {
     case SCREEN_UPDATE: drawUpdate();   break;
     case SCREEN_WIFI:   drawWifiList(); break;
     case SCREEN_KEYB:   drawKeyboard(); break;
+    case SCREEN_DIAG:   drawDiag();     break;
     case SCREEN_ASK_XP:
       drawFormat();
       drawModal("XP", "NECESITAS CONTADOR?", "SI", "NO");
@@ -908,6 +921,95 @@ static bool touchDown(int16_t &x, int16_t &y) {
   x = lastX;
   y = lastY;
   return down;
+}
+
+// --------------------------------------------------------------------- datos
+// Con el case cerrado no entra un multimetro, asi que las perillas que quedan
+// por calibrar (BAT_DIVIDER y el rango crudo del tactil) se leen aqui: se
+// apuntan los numeros y se corrigen las constantes en el siguiente release.
+
+// El VOLVER va en el centro-abajo a proposito: deja las cuatro esquinas libres
+// para poder tocarlas y ver hasta donde llega de verdad el panel.
+static const Btn BTN_DIAG_BACK = {110, 194, 100, 38, "VOLVER"};
+
+#define DIAG_Y_BAT 62
+#define DIAG_Y_ADC 82
+#define DIAG_Y_TAP 108
+#define DIAG_Y_RNG 128
+#define DIAG_Y_FW  154
+
+// Extremos que ha llegado a reportar el panel desde que se abrio la pantalla.
+static int16_t tpMinX = 4095, tpMaxX = -1, tpMinY = 4095, tpMaxY = -1;
+
+static void diagLine(int16_t y, const char *s) {
+  tft.fillRect(0, y - 9, 320, 18, C_BG);
+  tft.setTextFont(2);
+  tft.setTextDatum(ML_DATUM);
+  tft.setTextColor(C_TEXT, C_BG);
+  tft.drawString(s, 14, y);
+}
+
+static void drawDiagBat() {
+  char s[48];
+  if (batPct < 0) snprintf(s, sizeof s, "BAT   %u mV   USB (<%d)", batMv, BAT_MIN_MV);
+  else            snprintf(s, sizeof s, "BAT   %u mV   %d%%", batMv, batPct);
+  diagLine(DIAG_Y_BAT, s);
+  snprintf(s, sizeof s, "ADC   %u mV   x%.2f", batAdcMv, BAT_DIVIDER);
+  diagLine(DIAG_Y_ADC, s);
+}
+
+static void drawDiagTouch() {
+  char s[48];
+  int16_t px, py;
+  mapTouch(rawX, rawY, px, py);
+  snprintf(s, sizeof s, "TAP   crudo %d,%d   px %d,%d", rawX, rawY, px, py);
+  diagLine(DIAG_Y_TAP, s);
+  if (tpMaxX < 0) snprintf(s, sizeof s, "RANGO  toca las cuatro esquinas");
+  else snprintf(s, sizeof s, "RANGO X %d..%d   Y %d..%d", tpMinX, tpMaxX, tpMinY, tpMaxY);
+  diagLine(DIAG_Y_RNG, s);
+}
+
+static void drawDiag() {
+  tft.fillScreen(C_BG);
+  tft.setTextDatum(MC_DATUM);
+  tft.setFreeFont(&FreeSansBold12pt7b);
+  tft.setTextColor(C_TEXT, C_BG);
+  tft.drawString("DATOS", 160, 22);
+  drawRule(42);
+
+  batRead();  // sin esperar al refresco de 30 s, que aqui se mira al vuelo
+  batPct = batMv < BAT_MIN_MV ? -1 : batPercent(batMv);
+  drawDiagBat();
+  drawDiagTouch();
+
+  char s[44];
+  snprintf(s, sizeof s, "%s   AUTOTEST %s   MAP %d", VERSION,
+           selfTestOk ? "OK" : "FALLA", TOUCH_MAP);
+  diagLine(DIAG_Y_FW, s);
+  drawBtn(BTN_DIAG_BACK, C_GOLD_DIM, C_TEXT, &FreeSansBold9pt7b);
+}
+
+// Repinta solo la linea que cambia: la bateria una vez por segundo, para ver
+// el efecto de enchufar el USB, y el toque en cuanto se mueve el dedo.
+static void refreshDiag(bool down) {
+  static int16_t lastX = -1, lastY = -1;
+  static uint32_t lastBat = 0;
+
+  if (down && (rawX != lastX || rawY != lastY)) {
+    lastX = rawX;
+    lastY = rawY;
+    if (rawX < tpMinX) tpMinX = rawX;
+    if (rawX > tpMaxX) tpMaxX = rawX;
+    if (rawY < tpMinY) tpMinY = rawY;
+    if (rawY > tpMaxY) tpMaxY = rawY;
+    drawDiagTouch();
+  }
+
+  if (millis() - lastBat < 1000) return;
+  lastBat = millis();
+  batRead();
+  batPct = batMv < BAT_MIN_MV ? -1 : batPercent(batMv);
+  drawDiagBat();
 }
 
 // ------------------------------------------------------------------ acciones
@@ -1094,6 +1196,18 @@ static void handleTap(int16_t x, int16_t y) {
         if (WiFi.status() != WL_CONNECTED) wifiConnect();
         if (WiFi.status() == WL_CONNECTED) otaRun();
         dirty = true;
+      } else if (hit(BTN_DIAG, x, y)) {
+        tpMinX = tpMinY = 4095;  // el rango se mide desde que se entra
+        tpMaxX = tpMaxY = -1;
+        screen = SCREEN_DIAG;
+        dirty = true;
+      }
+      break;
+
+    case SCREEN_DIAG:
+      if (hit(BTN_DIAG_BACK, x, y)) {
+        screen = SCREEN_UPDATE;
+        dirty = true;
       }
       break;
 
@@ -1233,8 +1347,6 @@ static void handleTap(int16_t x, int16_t y) {
     }                                       \
   } while (0)
 
-static bool selfTestOk = true;
-
 static void selfTest() {
   bool ok = true;
 
@@ -1273,6 +1385,15 @@ static void selfTest() {
                                                 BTN_NO.y + BTN_NO.h - 1));
 
   CHECK(!hit(BTN_NET_OFF, BTN_NET_MORE.x + BTN_NET_MORE.w - 1, BTN_NET_MORE.y));
+
+  // los tres de ACTUALIZAR en fila, sin pisarse ni tapar la linea de abajo
+  CHECK(BTN_CHECK.y >= BTN_WIFI.y + BTN_WIFI.h);
+  CHECK(BTN_DIAG.y >= BTN_CHECK.y + BTN_CHECK.h);
+  CHECK(BTN_DIAG.y + BTN_DIAG.h < 220);
+  // el VOLVER de DATOS no puede caer en una esquina: son las que hay que tocar
+  CHECK(!hit(BTN_DIAG_BACK, 0, 0) && !hit(BTN_DIAG_BACK, 319, 0));
+  CHECK(!hit(BTN_DIAG_BACK, 0, 239) && !hit(BTN_DIAG_BACK, 319, 239));
+  CHECK(DIAG_Y_FW + 9 < BTN_DIAG_BACK.y);  // ni las lineas de texto
   CHECK(!hit(KB_OK, KB_CANCEL.x, KB_CANCEL.y));   // teclado sin solapes
   CHECK(!hit(KB_MOD[3], KB_MOD[2].x, KB_MOD[2].y));
   CHECK(kbKeyAt(160, 0) == 0);                    // fuera del teclado, nada
@@ -1337,12 +1458,12 @@ void setup() {
   }
   lastTouch = millis();
 
-  const uint16_t mv = batMillivolts();
-  batPct = mv < BAT_MIN_MV ? -1 : batPercent(mv);
+  batRead();
+  batPct = batMv < BAT_MIN_MV ? -1 : batPercent(batMv);
 
   selfTest();
   Serial.printf("pantalla %dx%d, bateria %u mV (%d%%)\n", tft.width(), tft.height(),
-                mv, batPct);
+                batMv, batPct);
 
   draw();  // pinta antes de encender: nada de basura de VRAM al arrancar
   dirty = false;
@@ -1363,17 +1484,9 @@ static void refreshBattery() {
   if (last && millis() - last < 30000) return;
   last = millis();
 
-  WiFi.mode(WIFI_OFF);  // solo se enciende en la pantalla de actualizar
-  prefs.begin("rift", false);
-  if (prefs.isKey("ssid")) {  // sin el guardia, NVS escupe un error por clave
-    prefs.getString("ssid", "").toCharArray(wifiSsid, sizeof wifiSsid);
-    prefs.getString("pass", "").toCharArray(wifiPass, sizeof wifiPass);
-  }
-
-  const uint16_t mv = batMillivolts();
-  const int16_t p = mv < BAT_MIN_MV ? -1 : batPercent(mv);
-  Serial.printf("bateria %u mV -> %d%%\n", mv, p);  // para ajustar BAT_DIVIDER
-  if (!selfTestOk) Serial.println("selfTest FAILED");  // que no se pierda en el arranque
+  batRead();
+  const int16_t p = batMv < BAT_MIN_MV ? -1 : batPercent(batMv);
+  Serial.printf("bateria %u mV -> %d%%\n", batMv, p);  // tambien sale en DATOS
   if (p == batPct) return;
   batPct = p;
   drawBattery();
@@ -1413,6 +1526,7 @@ void loop() {
     dirty = false;
   }
   refreshClock();
+  if (screen == SCREEN_DIAG) refreshDiag(down);
   refreshBattery();
   if (millis() - lastTouch > IDLE_OFF_MIN * 60000UL) powerOff();
   delay(10);

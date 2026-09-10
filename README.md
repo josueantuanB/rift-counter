@@ -14,6 +14,10 @@ Contador de puntos para el TCG **Riftbound**, en una placa **ES3C28P**
 - Apagado por sueno ligero: despierta al tocar la pantalla. Se apaga solo tras
   10 minutos sin uso, guardando la partida en NVS para seguir donde estaba.
 - Actualizacion por WiFi desde los releases de este repositorio.
+- Pantalla **DATOS** dentro de ACTUALIZAR: voltaje de bateria (el del pin y
+  el de la celda), coordenadas del tactil crudas y mapeadas, y el rango que
+  llega a reportar el panel. Es para calibrar `BAT_DIVIDER` y `TP_RAW_*` sin
+  abrir el case ni conectar el Serial.
 
 ## Compilar
 
