@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 11
-#define VERSION    "v1.1"
+#define FW_VERSION 12
+#define VERSION    "v1.2"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -1057,6 +1057,7 @@ static void addPoint(uint8_t i) {
 static void confirmWin() {
   rounds[winner]++;
   score[0] = score[1] = 0;
+  xp[0] = xp[1] = 0;  // cada partida de la serie arranca con la XP a cero
   screen = rounds[winner] >= roundsToWin() ? SCREEN_WIN : SCREEN_GAME;
   dirty = true;
 }
@@ -1418,6 +1419,21 @@ static void selfTest() {
   const uint32_t rem = 900;
   gameStart = millis() - (matchSeconds() - rem) * 1000UL;
   CHECK(remainingSeconds() == rem);
+
+  // Cerrar ronda en BO3 deja la siguiente partida limpia: sin puntos y sin XP.
+  const uint8_t savedRounds[2] = {rounds[0], rounds[1]};
+  const Screen savedScreen = screen;
+  fmt = FMT_BO3;
+  rounds[0] = rounds[1] = 0;
+  winner = 0;
+  xp[0] = 3;
+  xp[1] = 5;
+  confirmWin();
+  CHECK(xp[0] == 0 && xp[1] == 0);
+  CHECK(screen == SCREEN_GAME);  // en BO3 queda partida por jugar
+  rounds[0] = savedRounds[0];
+  rounds[1] = savedRounds[1];
+  screen = savedScreen;
   fmt = saved;
 
   CHECK(batPercent(3750) == 50);
