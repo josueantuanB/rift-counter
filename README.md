@@ -7,6 +7,8 @@ Contador de puntos para el TCG **Riftbound**, en una placa **ES3C28P**
 
 - Formatos BO1 y BO3, con marcador de rondas.
 - Marcador a 8 puntos por jugador, con confirmacion al cerrar la ronda.
+- Historial de puntos de la partida (icono junto a la bateria): quien sumo o
+  resto y como quedo el marcador, lo ultimo arriba.
 - Cuenta atras de partida: 30 min en BO1, 60 min en BO3.
 - Contador de XP opcional, que se pregunta al empezar.
 - Tirada de d20 para decidir quien empieza.

@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 13
-#define VERSION    "v1.3"
+#define FW_VERSION 14
+#define VERSION    "v1.4"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -234,6 +234,7 @@ enum Screen : uint8_t {
   SCREEN_ASK_XP,   // preguntar si la partida lleva XP
   SCREEN_ASK_OFF,  // confirmar apagado
   SCREEN_ASK_WIN,  // confirmar victoria
+  SCREEN_HIST,     // historial de puntos, encima de la partida
 };
 enum Fmt : uint8_t { FMT_BO1, FMT_BO3 };
 
@@ -254,6 +255,18 @@ static uint32_t xpSince = 0;
 static bool xpDone = false;   // la pulsacion larga ya resto
 static uint8_t rounds[2] = {0, 0};
 static uint8_t winner = 0;
+
+// Historial de la partida en curso: un apunte por punto sumado o restado, con
+// el marcador que dejo, para leerlo sin tener que reconstruir nada.
+#define HIST_MAX 64  // una partida a 8 son unos 15 apuntes
+struct Entry {
+  uint8_t who;
+  int8_t delta;
+  uint8_t score[2];
+};
+static Entry hist[HIST_MAX];
+static uint8_t histLen = 0;
+static uint8_t histPage = 0;
 
 static uint8_t roundsToWin() { return fmt == FMT_BO3 ? 2 : 1; }
 
@@ -281,6 +294,8 @@ static const Btn BTN_BACK  = {0, 0, 100, 46, "< VOLVER"};
 static const Btn BTN_BO1   = {24, 76, 132, 124, "BO1"};
 static const Btn BTN_BO3   = {164, 76, 132, 124, "BO3"};
 static const Btn BTN_MENU  = {0, 0, 92, 42, "< MENU"};
+// El icono del historial es chico: el toque vale en toda la esquina, bateria incluida.
+static const Btn BTN_HIST  = {208, 0, 112, 42, ""};
 
 // Centro de cada mitad: 0..159 y 160..319.
 static const int16_t HALF_CX[2] = {80, 240};
@@ -402,6 +417,13 @@ static void drawGame() {
   tft.setTextColor(C_TEAL, C_BG);
   tft.drawString(bar, 160, 16);
 
+  // Icono del historial: una lista. Cabe entre "RONDAS x-y" (acaba en 218) y
+  // el hueco que borra drawBattery (desde 242), asi el refresco no se lo come.
+  for (int16_t r = 0; r < 3; r++) {
+    tft.fillRect(226, 9 + r * 5, 2, 2, C_GOLD_DIM);
+    tft.fillRect(230, 9 + r * 5, 10, 2, C_GOLD_DIM);
+  }
+
   drawRule(36);
   tft.drawFastVLine(160, 44, 126, C_GOLD_DIM);
 
@@ -473,6 +495,51 @@ static void drawModal(const char *title, const char *body, const char *yes, cons
   n.label = no;
   drawBtn(y, C_GOLD, C_TEXT, &FreeSansBold9pt7b, C_PANEL, C_MODAL);
   drawBtn(n, C_GOLD_DIM, C_MUTED, &FreeSansBold9pt7b, C_PANEL, C_MODAL);
+}
+
+// Deja libre la franja de arriba: la bateria se repinta sola cada 30 s y se
+// comeria el borde del panel. De ancho tapa las cajas de XP (6..313), que si
+// no asoman por los lados.
+static const Btn HIST_PANEL     = {4, 44, 312, 190, ""};
+static const Btn BTN_HIST_CLOSE = {24, 192, 132, 34, "CERRAR"};
+static const Btn BTN_HIST_MORE  = {164, 192, 132, 34, "MAS"};
+#define HIST_PER_PAGE 7
+#define HIST_Y0 78
+#define HIST_DY 17
+
+static void drawHist() {
+  drawPanel(HIST_PANEL, C_GOLD, C_MODAL);
+  tft.setTextFont(2);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(C_TEAL, C_MODAL);
+  tft.drawString("HISTORIAL", 160, 58);
+  if (!histLen) {
+    tft.setTextColor(C_MUTED, C_MODAL);
+    tft.drawString("SIN PUNTOS TODAVIA", 160, HIST_Y0 + 3 * HIST_DY);
+  }
+
+  // Lo ultimo arriba: es lo que se viene a mirar.
+  for (uint8_t r = 0; r < HIST_PER_PAGE; r++) {
+    const int16_t n = histLen - 1 - (histPage * HIST_PER_PAGE + r);
+    if (n < 0) break;
+    const Entry &e = hist[n];
+    const int16_t y = HIST_Y0 + r * HIST_DY;
+    char t[8];
+    tft.setTextDatum(ML_DATUM);
+    tft.setTextColor(C_TEAL, C_MODAL);
+    tft.drawString(PLAYER[e.who], 28, y);
+    snprintf(t, sizeof t, "%+d", e.delta);
+    tft.setTextColor(e.delta > 0 ? C_TEXT : C_FURY, C_MODAL);
+    tft.drawString(t, 112, y);
+    snprintf(t, sizeof t, "%u-%u", e.score[0], e.score[1]);
+    tft.setTextDatum(MR_DATUM);
+    tft.setTextColor(C_GOLD, C_MODAL);
+    tft.drawString(t, 292, y);
+  }
+
+  drawBtn(BTN_HIST_CLOSE, C_GOLD_DIM, C_TEXT, &FreeSansBold9pt7b, C_PANEL, C_MODAL);
+  if (histLen > HIST_PER_PAGE)
+    drawBtn(BTN_HIST_MORE, C_GOLD, C_TEXT, &FreeSansBold9pt7b, C_PANEL, C_MODAL);
 }
 
 // ============================== red y OTA ==============================
@@ -868,6 +935,10 @@ static void draw() {
       drawGame();
       drawModal("VICTORIA", PLAYER[winner], "CONFIRMAR", "CORREGIR");
       break;
+    case SCREEN_HIST:
+      drawGame();
+      drawHist();
+      break;
   }
 }
 
@@ -1024,6 +1095,7 @@ static void resetGame() {
   score[0] = score[1] = 0;
   rounds[0] = rounds[1] = 0;
   xp[0] = xp[1] = 0;
+  histLen = 0;
   dice = 0;              // sin tirar todavia
   gameStart = millis();  // el reloj arranca aqui, no al pulsar EMPEZAR
   screen = SCREEN_DICE;
@@ -1043,9 +1115,19 @@ static void pick(const Btn &b, Fmt f) {
   dirty = true;
 }
 
+// Se llama justo despues de cambiar score[i], para apuntar el marcador nuevo.
+static void logPoint(uint8_t i, int8_t delta) {
+  if (histLen == HIST_MAX) {  // lleno: se pierde el mas viejo, no el ultimo
+    memmove(hist, hist + 1, sizeof hist - sizeof hist[0]);
+    histLen--;
+  }
+  hist[histLen++] = {i, delta, {score[0], score[1]}};
+}
+
 static void addPoint(uint8_t i) {
   if (score[i] >= TARGET_POINTS) return;
   score[i]++;
+  logPoint(i, 1);
   drawScore(i);
   if (score[i] < TARGET_POINTS) return;
 
@@ -1059,6 +1141,7 @@ static void confirmWin() {
   rounds[winner]++;
   score[0] = score[1] = 0;
   xp[0] = xp[1] = 0;  // cada partida de la serie arranca con la XP a cero
+  histLen = 0;        // y con su propio historial
   screen = rounds[winner] >= roundsToWin() ? SCREEN_WIN : SCREEN_GAME;
   dirty = true;
 }
@@ -1069,12 +1152,15 @@ static void confirmWin() {
 struct Session {
   uint8_t fmt, useXp, winner, score[2], rounds[2], xp[2];
   uint32_t remaining;
+  uint8_t histLen;
+  Entry hist[HIST_MAX];
 };
 
 static void sessionSave(uint32_t remaining) {
-  const Session v = {(uint8_t)fmt,   (uint8_t)useXp,       winner,
-                     {score[0], score[1]}, {rounds[0], rounds[1]},
-                     {xp[0], xp[1]},  remaining};
+  Session v = {(uint8_t)fmt,   (uint8_t)useXp,       winner,
+               {score[0], score[1]}, {rounds[0], rounds[1]},
+               {xp[0], xp[1]},  remaining, histLen};
+  memcpy(v.hist, hist, sizeof hist);
   prefs.putBytes("sess", &v, sizeof v);
 }
 
@@ -1092,6 +1178,8 @@ static bool sessionLoad() {
   rounds[1] = v.rounds[1];
   xp[0] = v.xp[0];
   xp[1] = v.xp[1];
+  histLen = v.histLen;
+  memcpy(hist, v.hist, sizeof hist);
 
   const uint32_t total = matchSeconds();
   const uint32_t rem = v.remaining > total ? total : v.remaining;
@@ -1106,7 +1194,7 @@ static bool sessionLoad() {
 // INT ni de su pull-up.
 static void powerOff() {
   const bool inGame = screen == SCREEN_GAME || screen == SCREEN_DICE ||
-                      screen == SCREEN_ASK_WIN;
+                      screen == SCREEN_ASK_WIN || screen == SCREEN_HIST;
   WiFi.mode(WIFI_OFF);
   digitalWrite(TFT_BL, LOW);
   tft.writecommand(0x10);  // ILI9341 sleep in
@@ -1169,6 +1257,12 @@ static void handleTap(int16_t x, int16_t y) {
         dirty = true;
         break;
       }
+      if (hit(BTN_HIST, x, y)) {
+        histPage = 0;
+        screen = SCREEN_HIST;
+        dirty = true;
+        break;
+      }
       for (uint8_t i = 0; i < 2; i++) {
         if (hit(BTN_PLUS[i], x, y)) {
           addPoint(i);
@@ -1177,6 +1271,7 @@ static void handleTap(int16_t x, int16_t y) {
         if (hit(BTN_MINUS[i], x, y)) {
           if (score[i]) {
             score[i]--;
+            logPoint(i, -1);
             drawScore(i);
           }
           break;
@@ -1328,6 +1423,17 @@ static void handleTap(int16_t x, int16_t y) {
         confirmWin();
       } else if (hit(BTN_NO, x, y)) {
         score[winner]--;  // era un error de cuenta: vuelve a 7
+        logPoint(winner, -1);
+        screen = SCREEN_GAME;
+        dirty = true;
+      }
+      break;
+
+    case SCREEN_HIST:
+      if (histLen > HIST_PER_PAGE && hit(BTN_HIST_MORE, x, y)) {
+        histPage = (histPage + 1) * HIST_PER_PAGE < histLen ? histPage + 1 : 0;
+        drawHist();  // solo el panel: la partida de debajo no ha cambiado
+      } else if (hit(BTN_HIST_CLOSE, x, y) || hit(BTN_HIST, x, y)) {
         screen = SCREEN_GAME;
         dirty = true;
       }
@@ -1422,7 +1528,18 @@ static void selfTest() {
   gameStart = millis() - (matchSeconds() - rem) * 1000UL;
   CHECK(remainingSeconds() == rem);
 
-  // Cerrar ronda en BO3 deja la siguiente partida limpia: sin puntos y sin XP.
+  // El historial apunta el marcador que deja cada punto y, lleno, suelta el
+  // mas viejo.
+  histLen = 0;
+  score[0] = 3;
+  logPoint(0, 1);
+  CHECK(histLen == 1 && hist[0].who == 0 && hist[0].delta == 1 && hist[0].score[0] == 3);
+  for (uint8_t i = 0; i < HIST_MAX; i++) logPoint(1, -1);
+  CHECK(histLen == HIST_MAX && hist[0].who == 1);
+  CHECK(HIST_Y0 + (HIST_PER_PAGE - 1) * HIST_DY + 8 < BTN_HIST_CLOSE.y);  // filas sobre botones
+
+  // Cerrar ronda en BO3 deja la siguiente partida limpia: sin puntos, sin XP
+  // y sin historial.
   const uint8_t savedRounds[2] = {rounds[0], rounds[1]};
   const Screen savedScreen = screen;
   fmt = FMT_BO3;
@@ -1431,7 +1548,7 @@ static void selfTest() {
   xp[0] = 3;
   xp[1] = 5;
   confirmWin();
-  CHECK(xp[0] == 0 && xp[1] == 0);
+  CHECK(xp[0] == 0 && xp[1] == 0 && histLen == 0);
   CHECK(screen == SCREEN_GAME);  // en BO3 queda partida por jugar
   rounds[0] = savedRounds[0];
   rounds[1] = savedRounds[1];
@@ -1475,6 +1592,9 @@ void setup() {
     prefs.getString("pass", "").toCharArray(wifiPass, sizeof wifiPass);
   }
 
+  // El autotest pisa el marcador, la XP, el historial y el reloj: tiene que ir
+  // antes de recuperar la partida, o el apagado automatico la devuelve a cero.
+  selfTest();
   if (prefs.isKey("sess") && sessionLoad()) {
     screen = score[0] >= TARGET_POINTS || score[1] >= TARGET_POINTS ? SCREEN_ASK_WIN
                                                                    : SCREEN_GAME;
@@ -1484,7 +1604,6 @@ void setup() {
   batRead();
   batPct = batMv < BAT_MIN_MV ? -1 : batPercent(batMv);
 
-  selfTest();
   Serial.printf("pantalla %dx%d, bateria %u mV (%d%%)\n", tft.width(), tft.height(),
                 batMv, batPct);
 
