@@ -14,8 +14,8 @@
 
 // Numero de build: es lo unico que se compara con el manifiesto. Subirlo en
 // cada release. La cadena solo se muestra en pantalla.
-#define FW_VERSION 14
-#define VERSION    "v1.4"
+#define FW_VERSION 15
+#define VERSION    "v1.5"
 
 // --- OTA -----------------------------------------------------------------
 // Rellenar con el repositorio. El manifiesto es un JSON de dos campos en la
@@ -234,6 +234,7 @@ enum Screen : uint8_t {
   SCREEN_ASK_XP,   // preguntar si la partida lleva XP
   SCREEN_ASK_OFF,  // confirmar apagado
   SCREEN_ASK_WIN,  // confirmar victoria
+  SCREEN_ASK_MENU, // confirmar la salida al menu, que abandona la partida
   SCREEN_HIST,     // historial de puntos, encima de la partida
 };
 enum Fmt : uint8_t { FMT_BO1, FMT_BO3 };
@@ -935,6 +936,10 @@ static void draw() {
       drawGame();
       drawModal("VICTORIA", PLAYER[winner], "CONFIRMAR", "CORREGIR");
       break;
+    case SCREEN_ASK_MENU:
+      drawGame();
+      drawModal("IR AL MENU", "SE PERDERA LA PARTIDA", "SALIR", "CANCELAR");
+      break;
     case SCREEN_HIST:
       drawGame();
       drawHist();
@@ -1194,7 +1199,8 @@ static bool sessionLoad() {
 // INT ni de su pull-up.
 static void powerOff() {
   const bool inGame = screen == SCREEN_GAME || screen == SCREEN_DICE ||
-                      screen == SCREEN_ASK_WIN || screen == SCREEN_HIST;
+                      screen == SCREEN_ASK_WIN || screen == SCREEN_ASK_MENU ||
+                      screen == SCREEN_HIST;
   WiFi.mode(WIFI_OFF);
   digitalWrite(TFT_BL, LOW);
   tft.writecommand(0x10);  // ILI9341 sleep in
@@ -1252,8 +1258,7 @@ static void handleTap(int16_t x, int16_t y) {
 
     case SCREEN_GAME:
       if (hit(BTN_MENU, x, y)) {
-        sessionClear();  // salir al menu abandona la partida
-        screen = SCREEN_MENU;
+        screen = SCREEN_ASK_MENU;  // salir abandona la partida: antes se pregunta
         dirty = true;
         break;
       }
@@ -1429,6 +1434,17 @@ static void handleTap(int16_t x, int16_t y) {
       }
       break;
 
+    case SCREEN_ASK_MENU:
+      if (hit(BTN_YES, x, y)) {
+        sessionClear();  // salir al menu abandona la partida
+        screen = SCREEN_MENU;
+        dirty = true;
+      } else if (hit(BTN_NO, x, y)) {
+        screen = SCREEN_GAME;
+        dirty = true;
+      }
+      break;
+
     case SCREEN_HIST:
       if (histLen > HIST_PER_PAGE && hit(BTN_HIST_MORE, x, y)) {
         histPage = (histPage + 1) * HIST_PER_PAGE < histLen ? histPage + 1 : 0;
@@ -1552,6 +1568,14 @@ static void selfTest() {
   CHECK(screen == SCREEN_GAME);  // en BO3 queda partida por jugar
   rounds[0] = savedRounds[0];
   rounds[1] = savedRounds[1];
+
+  // MENU en partida pregunta antes de salir, y CANCELAR la deja donde estaba.
+  // SALIR no se prueba: borra la sesion guardada, que aun no se ha recuperado.
+  screen = SCREEN_GAME;
+  handleTap(BTN_MENU.x + 1, BTN_MENU.y + 1);
+  CHECK(screen == SCREEN_ASK_MENU);
+  handleTap(BTN_NO.x + 1, BTN_NO.y + 1);
+  CHECK(screen == SCREEN_GAME);
   screen = savedScreen;
   fmt = saved;
 
@@ -1614,7 +1638,8 @@ void setup() {
 
 static void refreshClock() {
   static uint32_t lastShown = UINT32_MAX;
-  if (screen != SCREEN_GAME && screen != SCREEN_DICE && screen != SCREEN_ASK_WIN) return;
+  if (screen != SCREEN_GAME && screen != SCREEN_DICE && screen != SCREEN_ASK_WIN &&
+      screen != SCREEN_ASK_MENU) return;
   const uint32_t r = remainingSeconds();
   if (r == lastShown) return;
   lastShown = r;
